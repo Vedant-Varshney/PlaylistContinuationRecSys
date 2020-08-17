@@ -1,3 +1,4 @@
-# Playlist Continuation Rec Sys
+# Playlist Continuation RecSys
 
-A project to explore whether it is possible to generate good song recommendations and extend a given playlist.
+A project to explore whether it is possible to generate useful song recommendations
+to extend a given playlist.
