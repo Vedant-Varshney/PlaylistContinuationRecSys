@@ -1,7 +1,9 @@
 # Problem Statement and Strategy
 
 Notation:
+
 caps - fixed size space/vector
+
 lowercase - variable size space/vector
 
 ## Problem Definition:
@@ -25,7 +27,9 @@ playlist; i.e. they should continue on any trends down the playlist.
 For the subset of MSPD dataset considered here (cleaned_data.csv):
 
 _M_ - contains ~10,000 playlists
+
 _k_ - contains a long tail from ~2800 to 0 songs (see Data_Exploration)
+
 _S_ - ~100,000 unique songs
 
 _F_
@@ -77,16 +81,23 @@ Challenge. See paper 'Two-stage Model for Automatic Playlist Continuation at Sca
 approx. ~20,000 _for each playlist_ with as high a recall as possible.
 - Consider including more recent songs from the wider Spotify library before the space reduction.
 - Do not use the song characteristics here, we will use that later.
-- Build a WRMF model using only embeddings.
-- Output song embeddings for 20,000 songs per playlist.
+
+- Construct an implicit feedback, playlist-song matrix. 1 if song i in playlist j. 0 otherwise.
+- Build a WRMF model to factorise the matrix and find the latent embeddings.
+- Output song embeddings and playlist embeddings.
+- Use the embeddings to find the top 20,000 songs for each playlist.
+- Use these 20,000 songs from now on.
+
 
 *Step 2.* Playlist embeddings.
 - Use a conditional LSTM/GRU model to build a new set of playlist embeddings from the song
-embeddings. 
+embeddings (only 20,000 per playlist)
 - Use a learned representation of the categorical data (artist_name, album_name, tags?)
 to set an/the initial state for the first LSTM cell.
 - Output an embedding for each playlist. The goal here is to capture the information
 contained in the overall flow of the playlist, not just its constituent songs.
+- Proceed with these new playlist embeddings or blend with those from WRMF.
 
 *Step 3.* Gradient boosted trees for final song ranking per playlist.
 - Can finally use song characteristics as features.
+- 
