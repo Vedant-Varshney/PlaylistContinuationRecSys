@@ -84,9 +84,7 @@ approx. ~20,000 _for each playlist_ with as high a recall as possible.
 
 - Construct an implicit feedback, playlist-song matrix. 1 if song i in playlist j. 0 otherwise.
 - Build a WRMF model to factorise the matrix and find the latent embeddings.
-- Output song embeddings and playlist embeddings.
-- Use the embeddings to find the top 20,000 songs for each playlist.
-- Use these 20,000 songs from now on.
+- Find the top 20,000 songs for each playlist and use these from now on.
 
 
 *Step 2.* Playlist embeddings.
@@ -100,4 +98,4 @@ contained in the overall flow of the playlist, not just its constituent songs.
 
 *Step 3.* Gradient boosted trees for final song ranking per playlist.
 - Can finally use song characteristics as features.
-- 
+-
