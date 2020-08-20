@@ -18,7 +18,7 @@ def sparsity(df):
     return float(df.shape[0])*100/float(len(df.spotify_id.unique()) * len(df.playlist_id.unique()))
 
 
-def plot_value_occurences(column, df=df):
+def plot_value_occurences(column, df):
     """
     Plots the value count (histogram) for the specified column on the specified DF.
 
@@ -67,3 +67,48 @@ def cold_start_indxs(df, song_threshold=2, return_playlist=False, reverse=False)
         return df[df.playlist_id.isin(playlists)].index, playlists
     else:
         return df[df.playlist_id.isin(playlists)].index
+
+
+def withold_songs(df, withold_split=(0.2,0.2)):
+    """
+    Removes a certain proportion of songs from a certain proportion of playlists in DF.
+
+    Arguments:
+        - df - standard cleaned_data DF
+        - withold_split - tuple. First value = fraction of playlists to split.
+        Second value = fraction of songs to remove from said playlists.
+
+    Returns:
+        - df with songs excluded
+        - pd Series wrapping a dictionary of playlist and num_songs excluded.
+        key = playlist; value = list of spotify IDs excluded.
+
+    Note - the withold split is the target split; the exact split will vary slightly.
+    This is to avoid splits creating empty playlists.
+    """
+
+#     Songs in each playlist
+    playlist_vc = pd.value_counts(df.playlist_id)
+
+#     Number of songs potentially excluded from each playlist
+    split = playlist_vc.apply(lambda vc: round(vc*withold_split[1]))
+
+#     Filter out playlists with a 0 split and which leave no songs in remaining playlist
+    split = split[(split>0) & (playlist_vc>split)]
+
+#     Sample valid playlists
+    split = split.sample(frac=withold_split[0])
+
+    indxs_to_drop = []
+
+#     Dictionary for storing spotify IDs of songs excluded from each playlist
+    excluded = defaultdict(list)
+
+    for playlist_id, num_songs_excl in split.items():
+        temp_excl_df = df[df.playlist_id==playlist_id].sample(num_songs_excl)
+
+        excluded[playlist_id] += [row.spotify_id for _, row in temp_excl_df.iterrows()]
+
+        indxs_to_drop += list(temp_excl_df.index.values)
+
+    return df.drop(indxs_to_drop, axis=0), pd.Series(excluded)
