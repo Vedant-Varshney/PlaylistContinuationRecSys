@@ -6,6 +6,49 @@ Note - module currently assumes the standard df column names.
 Consider changing this later.
 """
 
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy as sp
+
+import implicit
+from tqdm.notebook import tqdm, trange
+
+from sklearn.model_selection import train_test_split
+
+from collections import defaultdict
+from importlib import reload
+
+import pickle
+
+from joblib import delayed, Parallel
+
+def indx_mapping(arr, indx_to_item=True):
+    """
+    Maps a unique array to a dictionary.
+
+    If indx_to_item:
+        keys = array index, value = array item.
+    Else other way round.
+    """
+    if indx_to_item:
+        return {i: x  for (i, x) in enumerate(arr)}
+    else:
+        return {x: i for (i, x) in enumerate(arr)}
+
+def recs_to_spotifyids(recommendations, indx_to_song):
+    """
+    Translates recommendations to a dict of Spotify IDs and scores.
+
+    Arguments:
+        - recommendations - as returned by implicit
+        - indx_to_song - dict mapping song index to Spotify ID
+
+    Returns:
+        - dict where key = Spotify ID, value = score
+    """
+
+    return {indx_to_song[id_]: score for (id_, score) in recommendations}
 
 def inspect_recommendations(playlist_indx, recommendations, df, songs_df,
                             indx_to_playlist=None, indx_to_song=None):
@@ -25,10 +68,10 @@ def inspect_recommendations(playlist_indx, recommendations, df, songs_df,
 
     # Create indx_to_playlist hashmap if not provided
     if indx_to_playlist is None:
-        indx_to_playlist = {i:playlist  for (i, playlist) in enumerate(df.playlist_id.unique())}
+        indx_to_playlist = indx_mapping(df.playlist_id.unique())
 
     if indx_to_song is None:
-        indx_to_song = {i:song  for (i, song) in enumerate(songs_df.index.unique())}
+        indx_to_song = indx_mapping(songs_df.index.unique())
 
     sample_playlist = indx_to_playlist[playlist_indx]
 
@@ -37,15 +80,10 @@ def inspect_recommendations(playlist_indx, recommendations, df, songs_df,
     print("Liked Tracks:")
     print(songs_df.loc[liked_song_ids][["track_name", "artist_name", "popularity"]])
 
-    rec_song_ids = []
-    rec_scores = []
+    recs_ids_dict = recs_to_spotifyids(recommendations, indx_to_song)
 
-    for id_, score in recommendations:
-        rec_song_ids.append(indx_to_song[id_])
-        rec_scores.append(score)
-
-    recs = songs_df.loc[rec_song_ids][["track_name", "artist_name", "popularity"]]
-    recs["score"] = rec_scores
+    recs = songs_df.loc[list(recs_ids_dict.keys())][["track_name", "artist_name", "popularity"]]
+    recs["score"] = recs_ids_dict.values()
 
     print("\nRecommended Tracks:")
     print(recs)
@@ -66,13 +104,13 @@ def df_to_sparse(df, all_songs):
     """
     # Create hashmap of the list of unique songs for fast index lookup
     # np.where etc will unnecessarily search the entire array and thus will not scale well.
-    song_to_indx = {song: i for (i, song) in enumerate(all_songs)}
+    song_to_indx = indx_mapping(all_songs, indx_to_item=False)
 
     # Mapping each song in the original DF to the index in the unique songs list
     song_indxs = df.spotify_id.apply(lambda id_: song_to_indx[id_]).values
 
     # Same for list of unique playlists
-    playlist_to_indx = {playlist: i for (i, playlist) in enumerate(df.playlist_id.unique())}
+    playlist_to_indx = indx_mapping(df.playlist_id.unique(), indx_to_item=False)
 
     # Mapping each playlist in the original DF to the index in the unique playlists list
     playlist_indxs = df.playlist_id.apply(lambda id_: playlist_to_indx[id_]).values
@@ -86,4 +124,91 @@ def df_to_sparse(df, all_songs):
     # column indx = playlist indx
     ratings_matrix = sp.sparse.csr_matrix((data, (song_indxs, playlist_indxs)), dtype=np.float64)
 
-    return ratings_matrixd
+    return ratings_matrix
+
+
+def hit_rate(recommendations, excluded_songs):
+    """
+    Returns the hit rate (correct recommendations/number of songs excluded)
+
+    Arguments:
+        - recommendations - recs for a single playlist as returned by implicit
+        - excluded_songs - Spotify IDs excluded from that playlist
+    """
+    recs_spotifyids = list(mf_utils.recs_to_spotifyids(recommendations, indx_to_song).keys())
+    num_hits = len(set(recs_spotifyids).intersection(set(excluded_songs)))
+
+    return num_hits/len(excluded_songs)
+
+
+def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
+                   parallelise=False, progressbar=True):
+    """
+    Calculates hit rate for all playlists in excl.
+
+    Arguments:
+        - model - implicit model
+        - item_user_matrix - sparse CSR matrix for model
+        - excl - dict. of the playlists and songs excluded in matrix. key = playlist; value = list of songs
+        - playlist_to_indx - dict. mapping playlist ID to index in playlists array as fed to implicit model
+        - parallelise - distribute job over 16 worker threads
+        - progressbar - show progress bar
+
+    Returns:
+        - list of tuples. [ (playlist_id, hit_rate_for_that_playlist), ... ]
+    """
+
+    if progressbar:
+        iter_excl = tqdm(excl.items(), total=len(excl))
+    else:
+        iter_excl = excl.items()
+
+#     Nested helper to parallelise
+    def helper(excl_playlist, excl_songs):
+        recs = model.recommend(playlist_to_indx[excl_playlist], item_user_matrix.T, N=20000)
+        return (excl_playlist, hit_rate(recs, excl_songs))
+
+    if parallelise:
+        hit_rates = \
+        Parallel(n_jobs=16, prefer="threads")(delayed(helper)(id_, songs) for (id_, songs) in iter_excl)
+    else:
+        hit_rates = []
+        for (id_, songs) in iter_excl:
+            hit_rates.append(helper(id_, songs))
+
+    return hit_rates
+
+
+
+def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx):
+
+    def helper(factors):
+        model = implicit.als.AlternatingLeastSquares(factors=factors)
+
+        # items_users matrix in this case is the songs_playlist matrix
+        model.fit(item_user_matrix, show_progress=False)
+
+        avg_hit_rate =  np.mean(
+            calc_hit_rates(model, split_train_ratings_matrix, excl, playlist_to_indx,
+                           parallelise=False)
+        )
+
+        return (factors, avg_hit_rate)
+
+    iter_factors = tqdm(srange, total=len(srange))
+
+    hit_rates = Parallel(n_jobs=16, prefer="threads")(delayed(helper)(factors) for factors in iter_factors)
+
+    return hit_rates
+
+
+
+def tuples_to_dict(list_tuples, series=True):
+    """
+    Converts a list of tuples [(first, second), (first, second), ...]
+    to a dictionary {first: second, first: second, ...}
+
+    Arguments:
+        - list_tuples
+    """
+    return {k: v for (k,v) in list_tuples}
