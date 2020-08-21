@@ -180,7 +180,8 @@ def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
 
 
 
-def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx):
+def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx,
+                       parallelise=False):
 
     def helper(factors):
         model = implicit.als.AlternatingLeastSquares(factors=factors)
@@ -188,16 +189,19 @@ def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx):
         # items_users matrix in this case is the songs_playlist matrix
         model.fit(item_user_matrix, show_progress=False)
 
-        avg_hit_rate =  np.mean(
-            calc_hit_rates(model, split_train_ratings_matrix, excl, playlist_to_indx,
-                           parallelise=False)
-        )
+        temp_hit_rates = calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
+                                        parallelise=False, progressbar=False)
+
+        avg_hit_rate = np.mean([hr for _, hr in temp_hit_rates])
 
         return (factors, avg_hit_rate)
 
     iter_factors = tqdm(srange, total=len(srange))
 
-    hit_rates = Parallel(n_jobs=16, prefer="threads")(delayed(helper)(factors) for factors in iter_factors)
+    if parallelise:
+        hit_rates = Parallel(n_jobs=4, prefer="threads")(delayed(helper)(factors) for factors in iter_factors)
+    else:
+        hit_rates = [helper(factors) for factors in iter_factors]
 
     return hit_rates
 
