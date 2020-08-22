@@ -100,7 +100,7 @@ def df_to_sparse(df, all_songs):
         excluded from that playlist when calculating the implicit ratings matrix.
 
     Returns:
-        - ratings_matrix - implicit ratings matrix in CSR format
+        - ratings_matrix - implicit ratings matrix in CSR format. Row indx = song indx; column indx = playlist indx
     """
     # Create hashmap of the list of unique songs for fast index lookup
     # np.where etc will unnecessarily search the entire array and thus will not scale well.
@@ -181,7 +181,7 @@ def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
 
 
 def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx,
-                       parallelise=False):
+                       parallelise=True):
 
     def helper(factors):
         model = implicit.als.AlternatingLeastSquares(factors=factors)
@@ -193,6 +193,8 @@ def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx,
                                         parallelise=False, progressbar=False)
 
         avg_hit_rate = np.mean([hr for _, hr in temp_hit_rates])
+
+        print(f"factors {factors} | hit rate {avg_hit_rate}")
 
         return (factors, avg_hit_rate)
 
