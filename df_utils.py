@@ -112,3 +112,6 @@ def withold_songs(df, withold_split=(0.2,0.2)):
         indxs_to_drop += list(temp_excl_df.index.values)
 
     return df.drop(indxs_to_drop, axis=0), pd.Series(excluded)
+
+def tester(x):
+    print(x)

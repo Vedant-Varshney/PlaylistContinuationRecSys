@@ -12,7 +12,7 @@ import numpy as np
 import scipy as sp
 
 import implicit
-from tqdm.notebook import tqdm, trange
+from tqdm import tqdm, trange
 
 from sklearn.model_selection import train_test_split
 
@@ -209,7 +209,7 @@ def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx,
 
 
 
-def tuples_to_dict(list_tuples, series=True):
+def tuples_to_dict(list_tuples):
     """
     Converts a list of tuples [(first, second), (first, second), ...]
     to a dictionary {first: second, first: second, ...}
@@ -218,3 +218,57 @@ def tuples_to_dict(list_tuples, series=True):
         - list_tuples
     """
     return {k: v for (k,v) in list_tuples}
+
+
+def unpack_tuples_list(list_tuples):
+    """
+    Converts a list of tuples [(first, second), (first, second), ... ]
+    into separate lists [[first, first, ...] , [second, second, ...]]
+    """
+    temp_dict = defaultdict(list)
+
+    for tup in list_tuples:
+        for i, elem in enumerate(tup):
+            temp_dict[i].append(elem)
+
+    return temp_dict.values()
+
+
+def gen_wrmf_candidates(model, item_user_matrix, playlist_ids, playlist_to_indx, indx_to_song, N=20000):
+    """
+    Generates N recommendations for each playlist.
+
+    Arguments:
+        - model - pre-trained implicit model
+        - item_user_matrix - sparse CSR item-user matrix
+        - playlist_ids - list of unique playlist IDs to generate recommendations for
+        - playlist_to_indx - dict. where key = playlist ID, value = index in matrix
+        - indx_to_song - dict. where key = index in matrix, value = song Spotify ID
+        - N - number of recommendations to generate per playlist
+
+    Returns:
+        - wrmf_recs_df - pandas DF containing recommended Spotify IDs. columns = playlist IDs
+        - wrmf_score_df - pandas DF containing scores for above dataframe.
+    """
+    def helper(playlist_id):
+        playlist_indx = playlist_to_indx[playlist_id]
+
+#         Need to provide user-item matrix here
+        recs = model.recommend(playlist_indx, item_user_matrix.T, N=N)
+        rec_indxs, rec_scores = unpack_tuples_list(recs)
+
+        rec_spot_ids = [indx_to_song[x] for x in rec_indxs]
+
+        return (playlist_id, rec_spot_ids, rec_scores)
+
+
+    play_ids, spot_ids, scores = unpack_tuples_list(
+        Parallel(n_jobs=4, prefer="threads")(delayed(helper)(id_) for id_ in tqdm(playlist_ids)))
+
+#     Quick check to ensure order was maintained in the above parallelised job
+    assert (pd.Series(play_ids) == pd.Series(playlist_ids)).all()
+
+    wrmf_recs_df = pd.DataFrame(columns=playlist_ids, data=np.asarray(spot_ids).T)
+    wrmf_score_df = pd.DataFrame(columns=playlist_ids, data=np.asarray(scores).T)
+
+    return wrmf_recs_df, wrmf_score_df
