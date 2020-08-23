@@ -12,7 +12,7 @@ import numpy as np
 import scipy as sp
 
 import implicit
-from tqdm import tqdm, trange
+from tqdm.notebook import tqdm, trange
 
 from sklearn.model_selection import train_test_split
 
@@ -127,7 +127,7 @@ def df_to_sparse(df, all_songs):
     return ratings_matrix
 
 
-def hit_rate(recommendations, excluded_songs):
+def hit_rate(recommendations, excluded_songs, indx_to_song):
     """
     Returns the hit rate (correct recommendations/number of songs excluded)
 
@@ -135,14 +135,14 @@ def hit_rate(recommendations, excluded_songs):
         - recommendations - recs for a single playlist as returned by implicit
         - excluded_songs - Spotify IDs excluded from that playlist
     """
-    recs_spotifyids = list(mf_utils.recs_to_spotifyids(recommendations, indx_to_song).keys())
+    recs_spotifyids = list(recs_to_spotifyids(recommendations, indx_to_song).keys())
     num_hits = len(set(recs_spotifyids).intersection(set(excluded_songs)))
 
     return num_hits/len(excluded_songs)
 
 
-def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
-                   parallelise=False, progressbar=True):
+def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx, indx_to_song,
+                   N=20000, parallelise=False, progressbar=True):
     """
     Calculates hit rate for all playlists in excl.
 
@@ -165,8 +165,8 @@ def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
 
 #     Nested helper to parallelise
     def helper(excl_playlist, excl_songs):
-        recs = model.recommend(playlist_to_indx[excl_playlist], item_user_matrix.T, N=20000)
-        return (excl_playlist, hit_rate(recs, excl_songs))
+        recs = model.recommend(playlist_to_indx[excl_playlist], item_user_matrix.T, N=N)
+        return (excl_playlist, hit_rate(recs, excl_songs, indx_to_song))
 
     if parallelise:
         hit_rates = \
