@@ -93,10 +93,33 @@ def sample_split(arr):
 
     return (arr[:sample_indx], arr[sample_indx:])
 
-def prepare_sample(playlist, latent_songs):
-    x, y = sample_split(playlist)
+def indxs_to_multihot(indx_arr, hot_arr_length):
+    multihot = np.zeros(hot_arr_length)
+    multihot[indx_arr] = 1
+    return multihot
 
-    x = pd.Series(x).apply(lambda indx: latent_songs[indx])
-    x = pd.DataFrame.from_dict(dict(zip(x.index, x.values))).T.to_numpy()
+# def prepare_sample(playlist, latent_songs, vocab_size):
+#
+#     for i, song_indx in enumerate(playlist):
+#         x_temp = song_indx
+#
+#         x_temp, y = sample_split(playlist)
+#
+#         x = pd.Series(x).apply(lambda indx: latent_songs[indx])
+#         x = pd.DataFrame.from_dict(dict(zip(x.index, x.values))).T.to_numpy()
+#
+#         y = indxs_to_multihot(y, vocab_size)
+#
+#     return (x, y)
 
-    return (x, y)
+
+def prepare_sample(playlist_indx_arr, latent_songs, vocab_size):
+
+    x_playlist = pd.Series(playlist_indx_arr[:-1])
+    x_playlist = x_playlist.apply(lambda indx: latent_songs[indx])
+
+    x = pd.DataFrame.from_dict(dict(zip(x_playlist.index, x_playlist.values))).T.to_numpy()
+
+    y = np.asarray([indxs_to_multihot(playlist_indx_arr[i+1:], vocab_size) for i in range(len(playlist_indx_arr)-1)])
+
+    return (x.astype(np.float32), y.astype(np.int32))
