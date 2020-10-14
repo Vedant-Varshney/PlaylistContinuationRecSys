@@ -6,7 +6,12 @@ __pycache__/
 *.csv
 
 *.p
+<<<<<<< HEAD
 *.pickle
 *.zip
 temp.py
 kaggle.json
+=======
+
+*.pickle
+>>>>>>> c89ba5904eecf54e48633f8e9f52d5c13f6837be
