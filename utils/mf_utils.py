@@ -100,7 +100,7 @@ def df_to_sparse(df, all_songs):
         excluded from that playlist when calculating the implicit ratings matrix.
 
     Returns:
-        - ratings_matrix - implicit ratings matrix in CSR format
+        - ratings_matrix - implicit ratings matrix in CSR format. Row indx = song indx; column indx = playlist indx
     """
     # Create hashmap of the list of unique songs for fast index lookup
     # np.where etc will unnecessarily search the entire array and thus will not scale well.
@@ -127,7 +127,7 @@ def df_to_sparse(df, all_songs):
     return ratings_matrix
 
 
-def hit_rate(recommendations, excluded_songs):
+def hit_rate(recommendations, excluded_songs, indx_to_song):
     """
     Returns the hit rate (correct recommendations/number of songs excluded)
 
@@ -135,14 +135,14 @@ def hit_rate(recommendations, excluded_songs):
         - recommendations - recs for a single playlist as returned by implicit
         - excluded_songs - Spotify IDs excluded from that playlist
     """
-    recs_spotifyids = list(mf_utils.recs_to_spotifyids(recommendations, indx_to_song).keys())
+    recs_spotifyids = list(recs_to_spotifyids(recommendations, indx_to_song).keys())
     num_hits = len(set(recs_spotifyids).intersection(set(excluded_songs)))
 
     return num_hits/len(excluded_songs)
 
 
-def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
-                   parallelise=False, progressbar=True):
+def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx, indx_to_song,
+                   N=20000, parallelise=False, progressbar=True):
     """
     Calculates hit rate for all playlists in excl.
 
@@ -165,8 +165,8 @@ def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
 
 #     Nested helper to parallelise
     def helper(excl_playlist, excl_songs):
-        recs = model.recommend(playlist_to_indx[excl_playlist], item_user_matrix.T, N=20000)
-        return (excl_playlist, hit_rate(recs, excl_songs))
+        recs = model.recommend(playlist_to_indx[excl_playlist], item_user_matrix.T, N=N)
+        return (excl_playlist, hit_rate(recs, excl_songs, indx_to_song))
 
     if parallelise:
         hit_rates = \
@@ -181,7 +181,7 @@ def calc_hit_rates(model, item_user_matrix, excl, playlist_to_indx,
 
 
 def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx,
-                       parallelise=False):
+                       parallelise=True):
 
     def helper(factors):
         model = implicit.als.AlternatingLeastSquares(factors=factors)
@@ -193,6 +193,8 @@ def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx,
                                         parallelise=False, progressbar=False)
 
         avg_hit_rate = np.mean([hr for _, hr in temp_hit_rates])
+
+        print(f"factors {factors} | hit rate {avg_hit_rate}")
 
         return (factors, avg_hit_rate)
 
@@ -207,7 +209,7 @@ def grid_search_factors(srange, item_user_matrix, excl, playlist_to_indx,
 
 
 
-def tuples_to_dict(list_tuples, series=True):
+def tuples_to_dict(list_tuples):
     """
     Converts a list of tuples [(first, second), (first, second), ...]
     to a dictionary {first: second, first: second, ...}
@@ -216,3 +218,57 @@ def tuples_to_dict(list_tuples, series=True):
         - list_tuples
     """
     return {k: v for (k,v) in list_tuples}
+
+
+def unpack_tuples_list(list_tuples):
+    """
+    Converts a list of tuples [(first, second), (first, second), ... ]
+    into separate lists [[first, first, ...] , [second, second, ...]]
+    """
+    temp_dict = defaultdict(list)
+
+    for tup in list_tuples:
+        for i, elem in enumerate(tup):
+            temp_dict[i].append(elem)
+
+    return temp_dict.values()
+
+
+def gen_wrmf_candidates(model, item_user_matrix, playlist_ids, playlist_to_indx, indx_to_song, N=20000):
+    """
+    Generates N recommendations for each playlist.
+
+    Arguments:
+        - model - pre-trained implicit model
+        - item_user_matrix - sparse CSR item-user matrix
+        - playlist_ids - list of unique playlist IDs to generate recommendations for
+        - playlist_to_indx - dict. where key = playlist ID, value = index in matrix
+        - indx_to_song - dict. where key = index in matrix, value = song Spotify ID
+        - N - number of recommendations to generate per playlist
+
+    Returns:
+        - wrmf_recs_df - pandas DF containing recommended Spotify IDs. columns = playlist IDs
+        - wrmf_score_df - pandas DF containing scores for above dataframe.
+    """
+    def helper(playlist_id):
+        playlist_indx = playlist_to_indx[playlist_id]
+
+#         Need to provide user-item matrix here
+        recs = model.recommend(playlist_indx, item_user_matrix.T, N=N)
+        rec_indxs, rec_scores = unpack_tuples_list(recs)
+
+        rec_spot_ids = [indx_to_song[x] for x in rec_indxs]
+
+        return (playlist_id, rec_spot_ids, rec_scores)
+
+
+    play_ids, spot_ids, scores = unpack_tuples_list(
+        Parallel(n_jobs=4, prefer="threads")(delayed(helper)(id_) for id_ in tqdm(playlist_ids)))
+
+#     Quick check to ensure order was maintained in the above parallelised job
+    assert (pd.Series(play_ids) == pd.Series(playlist_ids)).all()
+
+    wrmf_recs_df = pd.DataFrame(columns=playlist_ids, data=np.asarray(spot_ids).T)
+    wrmf_score_df = pd.DataFrame(columns=playlist_ids, data=np.asarray(scores).T)
+
+    return wrmf_recs_df, wrmf_score_df

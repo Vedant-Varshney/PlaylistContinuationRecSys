@@ -1,1 +1,12 @@
+__pycache__/
+.DS_Store
+
+.coverage
+
 *.csv
+
+*.p
+*.pickle
+*.zip
+temp.py
+kaggle.json
